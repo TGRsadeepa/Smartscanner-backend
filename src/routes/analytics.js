@@ -11,7 +11,9 @@ router.get('/trends', authenticate, async (req, res) => {
     const { months = 6 } = req.query;
 
     const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() - months);
+    startDate.setDate(1); // Avoid overflow at the end of the month
+    startDate.setMonth(startDate.getMonth() - parseInt(months));
+    startDate.setHours(0, 0, 0, 0);
 
     const receipts = await Receipt.find({
       userId: req.userId,
@@ -52,28 +54,39 @@ router.get('/insights/categories', authenticate, async (req, res) => {
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      const startDate = new Date(year, monthNum - 1, 1);
-      const endDate = new Date(year, monthNum, 0);
+      const parsedYear = parseInt(year);
+      const parsedMonth = parseInt(monthNum);
+      const startDate = new Date(Date.UTC(parsedYear, parsedMonth - 1, 1, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(parsedYear, parsedMonth, 0, 23, 59, 59, 999));
       query.date = { $gte: startDate, $lte: endDate };
     }
 
     const receipts = await Receipt.find(query);
 
     const categories = {
-      groceries: { total: 0, count: 0, percentage: 0 },
-      dining: { total: 0, count: 0, percentage: 0 },
-      transport: { total: 0, count: 0, percentage: 0 },
-      entertainment: { total: 0, count: 0, percentage: 0 },
-      utilities: { total: 0, count: 0, percentage: 0 },
-      other: { total: 0, count: 0, percentage: 0 }
+      Food: { total: 0, count: 0, percentage: 0 },
+      Furniture: { total: 0, count: 0, percentage: 0 },
+      Stationery: { total: 0, count: 0, percentage: 0 },
+      Medicine: { total: 0, count: 0, percentage: 0 },
+      BabyAccessories: { total: 0, count: 0, percentage: 0 },
+      MobileAccessories: { total: 0, count: 0, percentage: 0 },
+      PetItems: { total: 0, count: 0, percentage: 0 },
+      BankPayment: { total: 0, count: 0, percentage: 0 },
+      Transport: { total: 0, count: 0, percentage: 0 },
+      Other: { total: 0, count: 0, percentage: 0 }
     };
 
     let grandTotal = 0;
 
     receipts.forEach(receipt => {
-      const category = receipt.category || 'other';
-      categories[category].total += receipt.total;
-      categories[category].count += 1;
+      const category = receipt.category || 'Other';
+      if (categories.hasOwnProperty(category)) {
+        categories[category].total += receipt.total;
+        categories[category].count += 1;
+      } else {
+        categories.Other.total += receipt.total;
+        categories.Other.count += 1;
+      }
       grandTotal += receipt.total;
     });
 
@@ -103,8 +116,10 @@ router.get('/insights/top-stores', authenticate, async (req, res) => {
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      const startDate = new Date(year, monthNum - 1, 1);
-      const endDate = new Date(year, monthNum, 0);
+      const parsedYear = parseInt(year);
+      const parsedMonth = parseInt(monthNum);
+      const startDate = new Date(Date.UTC(parsedYear, parsedMonth - 1, 1, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(parsedYear, parsedMonth, 0, 23, 59, 59, 999));
       query.date = { $gte: startDate, $lte: endDate };
     }
 
@@ -137,9 +152,11 @@ router.get('/insights/budget-health', authenticate, async (req, res) => {
 
     const currentMonth = month || new Date().toISOString().slice(0, 7);
     const [year, monthNum] = currentMonth.split('-');
+    const parsedYear = parseInt(year);
+    const parsedMonth = parseInt(monthNum);
 
-    const startDate = new Date(year, monthNum - 1, 1);
-    const endDate = new Date(year, monthNum, 0);
+    const startDate = new Date(Date.UTC(parsedYear, parsedMonth - 1, 1, 0, 0, 0, 0));
+    const endDate = new Date(Date.UTC(parsedYear, parsedMonth, 0, 23, 59, 59, 999));
 
     const receipts = await Receipt.find({
       userId: req.userId,

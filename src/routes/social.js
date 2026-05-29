@@ -70,7 +70,7 @@ router.post('/:shareId/like', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Share not found' });
     }
 
-    const alreadyLiked = share.likes.includes(req.userId);
+    const alreadyLiked = share.likes.some(id => id.toString() === req.userId);
     if (alreadyLiked) {
       share.likes = share.likes.filter(id => id.toString() !== req.userId);
     } else {
@@ -139,7 +139,7 @@ router.post('/users/:targetUserId/follow', authenticate, async (req, res) => {
 
     const user = await User.findById(req.userId);
 
-    const alreadyFollowing = user.following.includes(targetUserId);
+    const alreadyFollowing = user.following.some(id => id.toString() === targetUserId);
     if (alreadyFollowing) {
       user.following = user.following.filter(id => id.toString() !== targetUserId);
       targetUser.followers = targetUser.followers.filter(id => id.toString() !== req.userId);
