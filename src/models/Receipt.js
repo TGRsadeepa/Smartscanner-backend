@@ -34,8 +34,8 @@ const receiptSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['groceries', 'dining', 'transport', 'entertainment', 'utilities', 'other'],
-    default: 'other'
+    enum: ['Food', 'Furniture', 'Stationery', 'Medicine', 'BabyAccessories', 'MobileAccessories', 'PetItems', 'BankPayment', 'Transport', 'Other'],
+    default: 'Other'
   },
   tags: [String],
   notes: String,

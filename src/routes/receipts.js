@@ -13,6 +13,12 @@ try {
   console.warn('Google Gemini SDK not available. /api/receipts/analyze will be disabled.', error.message);
 }
 
+const parseSafeDate = (dateStr) => {
+  if (!dateStr) return undefined;
+  const parsed = new Date(dateStr);
+  return isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
 // Create receipt from image
 router.post('/analyze', authenticate, async (req, res) => {
   try {
@@ -26,17 +32,22 @@ router.post('/analyze', authenticate, async (req, res) => {
       return res.status(503).json({ error: 'Gemini AI SDK is not installed or configured.' });
     }
 
-    // Call Gemini AI to analyze receipt
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
+    // Convert base64 and clean prefix
+    const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
 
-    // Convert base64 to buffer
-    const imageBuffer = Buffer.from(imageData.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+    // Call Gemini AI to analyze receipt
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-2.5-flash',
+      generationConfig: { responseMimeType: 'application/json' }
+    });
 
     const prompt = `Analyze this receipt image and extract the following information in JSON format:
     {
       "storeName": "store name",
       "date": "date if visible",
       "total": numeric total amount,
+      "category": "must be one of: Food, Furniture, Stationery, Medicine, BabyAccessories, MobileAccessories, PetItems, BankPayment, Transport, Other",
       "items": [{"name": "item name", "quantity": 1, "price": 0, "category": "category"}],
       "taxAmount": tax amount if visible,
       "paymentMethod": "payment method if visible",
@@ -46,7 +57,7 @@ router.post('/analyze', authenticate, async (req, res) => {
     const result = await model.generateContent([
       {
         inlineData: {
-          data: imageData,
+          data: base64Data,
           mimeType: 'image/jpeg'
         }
       },
@@ -54,14 +65,16 @@ router.post('/analyze', authenticate, async (req, res) => {
     ]);
 
     const analysisText = result.response.text();
-    const analysisData = JSON.parse(analysisText);
+    const cleanText = analysisText.replace(/```json|```/g, '').trim();
+    const analysisData = JSON.parse(cleanText);
 
     // Create receipt
     const receipt = new Receipt({
       userId: req.userId,
       storeName: storeName || analysisData.storeName,
-      date: date || analysisData.date,
+      date: date ? new Date(date) : (parseSafeDate(analysisData.date) || new Date()),
       total: analysisData.total,
+      category: analysisData.category || 'Other',
       items: analysisData.items,
       rawImageData: imageData,
       analysisData: {
@@ -74,21 +87,8 @@ router.post('/analyze', authenticate, async (req, res) => {
 
     await receipt.save();
 
-    // Update budget
-    const currentDate = new Date();
-    const monthKey = currentDate.toISOString().slice(0, 7);
-
-    let budget = await Budget.findOne({ userId: req.userId, month: monthKey });
-    if (!budget) {
-      budget = new Budget({
-        userId: req.userId,
-        month: monthKey,
-        budget: 20000 // Default, will be updated from user settings
-      });
-    }
-
-    budget.spent += analysisData.total;
-    await budget.save();
+    // Update budget spent, remaining, alerts, and categoryBreakdown
+    await Budget.updateBudgetForUserAndMonth(req.userId, receipt.date);
 
     res.status(201).json({
       message: 'Receipt analyzed and saved',
@@ -110,8 +110,10 @@ router.get('/', authenticate, async (req, res) => {
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      const startDate = new Date(year, monthNum - 1, 1);
-      const endDate = new Date(year, monthNum, 0);
+      const parsedYear = parseInt(year);
+      const parsedMonth = parseInt(monthNum);
+      const startDate = new Date(Date.UTC(parsedYear, parsedMonth - 1, 1, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(parsedYear, parsedMonth, 0, 23, 59, 59, 999));
       query.date = { $gte: startDate, $lte: endDate };
     }
 
@@ -168,6 +170,9 @@ router.put('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Receipt not found' });
     }
 
+    // Recalculate budget category breakdown
+    await Budget.updateBudgetForUserAndMonth(req.userId, receipt.date);
+
     res.json({ message: 'Receipt updated', receipt });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -185,6 +190,9 @@ router.delete('/:id', authenticate, async (req, res) => {
     if (!receipt) {
       return res.status(404).json({ error: 'Receipt not found' });
     }
+
+    // Recalculate budget spent and category breakdown
+    await Budget.updateBudgetForUserAndMonth(req.userId, receipt.date);
 
     res.json({ message: 'Receipt deleted' });
   } catch (error) {
